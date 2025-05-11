@@ -1,12 +1,5 @@
 project_name: local-pvc-cleaner
 
-gomod:
-  proxy: true
-  env:
-    - GOPROXY=https://proxy.golang.org,direct
-    - GOSUMDB=sum.golang.org
-  mod: mod
-
 builds:
   - goos:
       - linux
