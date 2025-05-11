@@ -1,4 +1,5 @@
 project_name: local-pvc-cleaner
+version: 2
 
 builds:
   - goos:
@@ -8,8 +9,8 @@ builds:
 
 dockers:
   - image_templates:
-      - ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{.ProjectName}}:{{ .Tag }}
-      - ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{.ProjectName}}:latest
+      - ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER | toLower }}/{{.ProjectName}}:{{ .Tag }}
+      - ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER | toLower }}/{{.ProjectName}}:latest
     build_flag_templates:
       - "--label=org.opencontainers.image.created={{.Date}}"
       - "--label=org.opencontainers.image.title={{.ProjectName}}"
