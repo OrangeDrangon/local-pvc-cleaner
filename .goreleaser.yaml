@@ -1,0 +1,30 @@
+project_name: local-pvc-cleaner
+
+gomod:
+  proxy: true
+  env:
+    - GOPROXY=https://proxy.golang.org,direct
+    - GOSUMDB=sum.golang.org
+  mod: mod
+
+builds:
+  - goos:
+      - linux
+    goarch:
+      - amd64
+
+dockers:
+  - image_templates:
+      - ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{.ProjectName}}:{{ .Tag }}
+      - ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{.ProjectName}}:latest
+    build_flag_templates:
+      - "--pull"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+
+release:
+  draft: false
+  disable: false
+  skip_upload: true
