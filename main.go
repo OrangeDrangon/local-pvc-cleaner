@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	selectedNodeAnnotation   = "local.path.provisioner/selected-node"
-	provisionerAnnotation    = "pv.kubernetes.io/provisioned-by"
+	selectedNodeAnnotation   = "volume.kubernetes.io/selected-node"
+	provisionerAnnotation    = "volume.kubernetes.io/storage-provisioner"
 	expectedProvisionerValue = "rancher.io/local-path"
 )
 
@@ -78,7 +78,7 @@ func main() {
 	nodeInformer := factory.Core().V1().Nodes().Informer()
 
 	nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		DeleteFunc: func(obj interface{}) {
+		DeleteFunc: func(obj any) {
 			node := obj.(*corev1.Node)
 			fmt.Printf("node deleted: %s\n", node.Name)
 			cleanupPVCsForNode(context.Background(), clientset, node.Name)
