@@ -22,37 +22,34 @@ const (
 	expectedProvisionerValue = "rancher.io/local-path"
 )
 
-func cleanupPVCForNode(ctx context.Context, clientset *kubernetes.Clientset, nodeName string, pv corev1.PersistentVolume) {
-	ann := pv.Annotations
-	if ann[selectedNodeAnnotation] != nodeName ||
-		ann[provisionerAnnotation] != expectedProvisionerValue {
+func cleanupPVCForNode(ctx context.Context, clientset *kubernetes.Clientset, nodeName string, persistentVolume corev1.PersistentVolume) {
+	annotations := persistentVolume.Annotations
+	if annotations[selectedNodeAnnotation] != nodeName || annotations[provisionerAnnotation] != expectedProvisionerValue {
 		return
 	}
 
-	ref := pv.Spec.ClaimRef
+	ref := persistentVolume.Spec.ClaimRef
 	if ref == nil {
 		return
 	}
 
-	err := clientset.CoreV1().
-		PersistentVolumeClaims(ref.Namespace).
-		Delete(ctx, ref.Name, metav1.DeleteOptions{})
+	err := clientset.CoreV1().PersistentVolumeClaims(ref.Namespace).Delete(ctx, ref.Name, metav1.DeleteOptions{})
 	if err != nil {
 		fmt.Printf("failed to delete PVC %s/%s: %v\n", ref.Namespace, ref.Name, err)
 		return
 	}
 
-	fmt.Printf("deleted PVC %s/%s bound to PV %s\n", ref.Namespace, ref.Name, pv.Name)
+	fmt.Printf("deleted PVC %s/%s bound to PV %s\n", ref.Namespace, ref.Name, persistentVolume.Name)
 }
 
 func cleanupPVCsForNode(ctx context.Context, clientset *kubernetes.Clientset, nodeName string) {
-	pvs, err := clientset.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
+	persistentVolumes, err := clientset.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		fmt.Printf("error listing PVs: %v\n", err)
 		return
 	}
-	for _, pv := range pvs.Items {
-		go cleanupPVCForNode(ctx, clientset, nodeName, pv)
+	for _, persistentVolume := range persistentVolumes.Items {
+		go cleanupPVCForNode(ctx, clientset, nodeName, persistentVolume)
 	}
 }
 
@@ -60,8 +57,9 @@ func main() {
 	// kubeconfig or in-cluster
 	var config *rest.Config
 	var err error
-	if kc := os.Getenv("KUBECONFIG"); kc != "" {
-		config, err = clientcmd.BuildConfigFromFlags("", kc)
+	kubeConfig := os.Getenv("KUBECONFIG")
+	if kubeConfig != "" {
+		config, err = clientcmd.BuildConfigFromFlags("", kubeConfig)
 	} else {
 		config, err = rest.InClusterConfig()
 	}
