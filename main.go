@@ -20,36 +20,59 @@ const (
 	selectedNodeAnnotation   = "volume.kubernetes.io/selected-node"
 	provisionerAnnotation    = "volume.kubernetes.io/storage-provisioner"
 	expectedProvisionerValue = "rancher.io/local-path"
+	pvcByNodeIndex           = "pvcByNode"
+	podByPvcIndex            = "podByPvc"
 )
 
-func cleanupPVCForNode(ctx context.Context, clientset *kubernetes.Clientset, nodeName string, persistentVolume corev1.PersistentVolume) {
-	annotations := persistentVolume.Annotations
-	if annotations[selectedNodeAnnotation] != nodeName || annotations[provisionerAnnotation] != expectedProvisionerValue {
-		return
-	}
-
-	ref := persistentVolume.Spec.ClaimRef
-	if ref == nil {
-		return
-	}
-
-	err := clientset.CoreV1().PersistentVolumeClaims(ref.Namespace).Delete(ctx, ref.Name, metav1.DeleteOptions{})
+func deleteVolumes(ctx context.Context, clientset *kubernetes.Clientset, factory informers.SharedInformerFactory, pvc *corev1.PersistentVolumeClaim) {
+	err := clientset.CoreV1().PersistentVolumeClaims(pvc.Namespace).Delete(ctx, pvc.Name, metav1.DeleteOptions{})
 	if err != nil {
-		fmt.Printf("failed to delete PVC %s/%s: %v\n", ref.Namespace, ref.Name, err)
+		fmt.Printf("failed to delete pvc(%s): %v\n", pvc.Name, err)
+		return
+	}
+	fmt.Printf("deleted pvc(%s)\n", pvc.Name)
+
+	pvName := pvc.Spec.VolumeName
+	if pvName == "" {
+		fmt.Printf("pvc(%s) is not bound to a volume\n", pvc.Name)
 		return
 	}
 
-	fmt.Printf("deleted PVC %s/%s bound to PV %s\n", ref.Namespace, ref.Name, persistentVolume.Name)
+	err = clientset.CoreV1().PersistentVolumes().Delete(ctx, pvName, metav1.DeleteOptions{})
+	if err != nil {
+		fmt.Printf("failed to delete pv(%s): %v\n", pvName, err)
+		return
+	}
+
+	fmt.Printf("deleted pv(%s)\n", pvName)
+
+	pods, err := factory.Core().V1().Pods().Informer().GetIndexer().ByIndex(podByPvcIndex, pvc.Name)
+	if err != nil {
+		fmt.Printf("error getting pods from index: %v\n", err)
+		return
+	}
+
+	for _, podAny := range pods {
+		pod := podAny.(*corev1.Pod)
+		err = clientset.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{})
+		if err != nil {
+			fmt.Printf("failed to delete pod(%s): %v\n", pod.Name, err)
+			continue
+		}
+
+		fmt.Printf("deleted pod(%s)\n", pod.Name)
+	}
 }
 
-func cleanupPVCsForNode(ctx context.Context, clientset *kubernetes.Clientset, nodeName string) {
-	persistentVolumes, err := clientset.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
+func cleanupVolumesByNode(ctx context.Context, clientset *kubernetes.Clientset, nodeName string, factory informers.SharedInformerFactory) {
+	persistentVolumeClaims, err := factory.Core().V1().PersistentVolumeClaims().Informer().GetIndexer().ByIndex(pvcByNodeIndex, nodeName)
 	if err != nil {
-		fmt.Printf("error listing PVs: %v\n", err)
+		fmt.Printf("error getting pvc from index: %v\n", err)
 		return
 	}
-	for _, persistentVolume := range persistentVolumes.Items {
-		go cleanupPVCForNode(ctx, clientset, nodeName, persistentVolume)
+	for _, pvcAny := range persistentVolumeClaims {
+		pvc := pvcAny.(*corev1.PersistentVolumeClaim)
+		deleteVolumes(ctx, clientset, factory, pvc)
 	}
 }
 
@@ -73,13 +96,46 @@ func main() {
 	}
 
 	factory := informers.NewSharedInformerFactory(clientset, 0)
-	nodeInformer := factory.Core().V1().Nodes().Informer()
 
+	podInformer := factory.Core().V1().Pods().Informer()
+	podInformer.AddIndexers(cache.Indexers{
+		podByPvcIndex: func(obj any) ([]string, error) {
+			pod := obj.(*corev1.Pod)
+			pvcs := make([]string, 0, len(pod.Spec.Volumes))
+			for _, volume := range pod.Spec.Volumes {
+				if volume.PersistentVolumeClaim == nil {
+					continue
+				}
+
+				claimName := volume.PersistentVolumeClaim.ClaimName
+				if claimName == "" {
+					continue
+				}
+				pvcs = append(pvcs, claimName)
+			}
+
+			return pvcs, nil
+		},
+	})
+
+	pvcInformer := factory.Core().V1().PersistentVolumeClaims().Informer()
+	pvcInformer.AddIndexers(cache.Indexers{
+		pvcByNodeIndex: func(obj any) ([]string, error) {
+			pvc := obj.(*corev1.PersistentVolumeClaim)
+			if pvc.Annotations[provisionerAnnotation] != expectedProvisionerValue {
+				return nil, nil
+			}
+
+			return []string{pvc.Annotations[selectedNodeAnnotation]}, nil
+		},
+	})
+
+	nodeInformer := factory.Core().V1().Nodes().Informer()
 	nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		DeleteFunc: func(obj any) {
 			node := obj.(*corev1.Node)
 			fmt.Printf("node deleted: %s\n", node.Name)
-			cleanupPVCsForNode(context.Background(), clientset, node.Name)
+			cleanupVolumesByNode(context.Background(), clientset, node.Name, factory)
 		},
 	})
 
