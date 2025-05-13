@@ -9,6 +9,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -135,13 +136,35 @@ func main() {
 		DeleteFunc: func(obj any) {
 			node := obj.(*corev1.Node)
 			fmt.Printf("node deleted: %s\n", node.Name)
-			cleanupVolumesByNode(context.Background(), clientset, node.Name, factory)
+			cleanupVolumesByNode(context.TODO(), clientset, node.Name, factory)
 		},
 	})
 
 	stopCh := make(chan struct{})
 	factory.Start(stopCh)
 	factory.WaitForCacheSync(stopCh)
+
+	pvcs, err := factory.Core().V1().PersistentVolumeClaims().Lister().List(labels.Everything())
+	for _, pvc := range pvcs {
+		if pvc.Annotations[provisionerAnnotation] != expectedProvisionerValue {
+			continue
+		}
+
+		nodeName := pvc.Annotations[selectedNodeAnnotation]
+		_, exists, err := factory.Core().V1().Nodes().Informer().GetStore().GetByKey(nodeName)
+		if err != nil {
+			fmt.Printf("failed to get node(%s) from pvc(%s): %v\n", nodeName, pvc.Name, err)
+			continue
+		}
+
+		if exists {
+			fmt.Printf("node(%s) does exist in store from pvc(%s)\n", nodeName, pvc.Name)
+			continue
+		}
+
+		fmt.Printf("node(%s) does not exist in store from pvc(%s)\n", nodeName, pvc.Name)
+		deleteVolumes(context.TODO(), clientset, factory, pvc)
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
