@@ -16,7 +16,7 @@ builds:
 
 kos:
   - repositories:
-      - ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER | tolower }}/{{.ProjectName}}
+      - ghcr.io/orangedrangon/{{.ProjectName}}
     tags:
       - "{{.Tag}}"
       - latest
