@@ -16,7 +16,7 @@ builds:
 
 kos:
   - repositories:
-      - ghcr.io/orangedrangon/{{.ProjectName}}
+      - ghcr.io/orangedrangon/local-pvc-cleaner
     tags:
       - "{{.Tag}}"
       - latest
